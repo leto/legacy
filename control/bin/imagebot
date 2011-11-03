@@ -1,0 +1,161 @@
+#!/usr/bin/perl -w
+# I am the image bot. I am a beautiful butterfly.
+# I create the preview + individual pages for image galleries
+# Version 0.2 - 19. Aug 2007
+use strict;
+use warnings;
+
+########### Global Settings
+my $PER_PAGE = 5;
+my $page_prefix = "page";
+my $page_suffix = "php";
+### Important directories 
+my $BASE_DIR="/export/domains/leto.net";
+my $WWW="$BASE_DIR/htdocs";   
+my $adsense_default = "$WWW/ads/linkunit_200x90.php";
+my $adsense_placement = 1; # place the adsense ad unit under which image number on each page?
+
+my $CONTENT_DIR="$WWW/content";
+my $IMAGES_DIR="$WWW/pics";
+my $TEMPLATE_DIR="$WWW/templates";
+### Files
+my $TOP="$CONTENT_DIR/top.php";
+my $HEAD="$CONTENT_DIR/head.php";
+my $FOOT="$CONTENT_DIR/foot.php";
+my $LOGOSEARCH="$CONTENT_DIR/logosearch.php";
+my $LEFTAD="$CONTENT_DIR/leftad.php";
+my $RIGHTAD="$CONTENT_DIR/rightad.php";
+my $TMPL="$TEMPLATE_DIR/template.php";
+my $NAVBAR = 1;
+
+my $url = shift;
+my $dir = $WWW . $url;
+my $imagedata = "$dir/imagedata.txt";
+my $title_file = "$dir/title.txt";
+my $preview_maker = "djpeg -scale 1/2 $dir/INPUT | cjpeg > $dir/OUTPUT ";
+
+print "Generating previews:";
+opendir (DIR, $dir) or die "cannot opendir $dir";
+my @only_jpg = grep  {-f "$dir/$_" && /\.(jpg|JPG)/ && !/^small_/ } readdir(DIR);
+foreach my $file (@only_jpg) {
+    &make_preview ($file);
+}
+closedir (DIR);
+print "\n";
+
+sub make_preview {
+	my $file = shift;
+	my $do_preview = $preview_maker;
+	$do_preview =~ s!INPUT!$file!g;
+	$do_preview =~ s!OUTPUT!small_$file!g;
+	system( $do_preview );
+	print ".";
+	#print $do_preview . "\n";
+}
+
+
+######################################
+
+
+open(FILE, $imagedata) or die $!;
+my @images = <FILE>;
+close(FILE) or die $!;
+
+my $pages = $#images % $PER_PAGE == 0 ? $#images / $PER_PAGE : int($#images / $PER_PAGE) + 1;
+print "You would like me to fiddle with $dir which has $pages pages?\n";
+print @images;
+my $pic_template_file = "$TEMPLATE_DIR/pic_template.php";
+my $pic_template = slurp($pic_template_file);
+my $page_template = slurp($TMPL);
+my $nav_template = slurp("$TEMPLATE_DIR/nav_template.php");
+my $first_nav_template = slurp("$TEMPLATE_DIR/first_nav_template.php");
+my $last_nav_template = slurp("$TEMPLATE_DIR/last_nav_template.php");
+my $large_pic_nav_template = slurp("$TEMPLATE_DIR/large_pic_nav_template.php");
+my $ad = slurp($adsense_default);
+
+
+
+my $title = slurp($title_file);
+#print "\n====page template======\n";
+#print $page_template;
+#print "\n=======================\n";
+my ($i,$j,$this_page);
+my $pagenum=1;
+#for ($i=0; $i < $pages; $i++ ){
+for($i=0; $i <= $#images; $i ++){
+
+	my ($FILE,$COMMENT) = split(/:/, $images[$i],2 ) ;
+	chomp( $FILE, $COMMENT );
+	$this_page .= $pic_template;
+	#my %template = ( LARGEFILE=>"", COMMENT => $COMMENT, FILE => $FILE );
+	#$this_page =~ s/%%(.+?)%%/$template{$1}/g ;
+
+	# generate individual pic page
+	my $large_pic_page_name = $FILE;
+	$large_pic_page_name =~ s!\.jpg!\.php!i;
+	#$large_pic_page_name = "$dir/$large_pic_page_name";
+	my $large_pic_template = $page_template;
+	#my %large_pic_tmpl = ( TITLE => $FILE , CONTENT => "<center><img src=$FILE border=0></center>" );
+	#$large_pic_template =~ s/%%(.+?)%%/$large_pic_tmpl{$1}/g ;
+
+	# large pic nav bar
+	my $lp_nav = $large_pic_nav_template;
+	my %lp_tmpl = ( UP => $page_prefix . $pagenum . ".$page_suffix" );
+	$lp_nav  =~ s/%%(.+?)%%/$lp_tmpl{$1}/g ;
+	#print "\nlp_nav = $lp_nav\n";
+	#$large_pic_template = $lp_nav . $large_pic_template;
+        my %large_pic_tmpl = ( TITLE => $FILE , CONTENT => "$lp_nav<center><img src=$FILE border=0><br>$COMMENT</center>" );
+        $large_pic_template =~ s/%%(.+?)%%/$large_pic_tmpl{$1}/g ;
+
+
+        my %template = ( LARGEFILE=>$large_pic_page_name, COMMENT => $COMMENT, FILE => $FILE );
+        $this_page =~ s/%%(.+?)%%/$template{$1}/g ;
+
+                
+	#print "trying to open $large_pic_page_name";
+	open(FD1, ">$dir/$large_pic_page_name") or die $!;
+	#print FD1 "LP\n";
+	print FD1 $large_pic_template;
+	#print "----LP----\n $large_pic_template\n-------\n";
+	close(FD1) or die $!;
+        print "wrote to $large_pic_page_name\n";
+ 
+
+	# put in adsense stuff
+	if ($i > 0 && ( ($i - 1) % $PER_PAGE == 0) ){
+		$this_page .= "<center>$ad</center>";
+	}
+	# generate the next preview page
+	if( ($i % ($PER_PAGE-1) == 0 && $i != 0) || ($i == $#images) ){
+		my $pagename = $page_prefix . $pagenum . ".$page_suffix";
+		if( $pages > 1 ){
+			my %nav_tmpl = ( BACK => $page_prefix . ($pagenum-1) . ".$page_suffix",
+					 FORWARD=> $page_prefix . ($pagenum+1) . ".$page_suffix",
+					 UP => $url );
+			my $this_nav = $nav_template;
+			if( $pagenum == 1 ){
+				$this_nav = $first_nav_template;
+			} elsif( $pagenum == $pages ) {
+				$this_nav = $last_nav_template;
+			}
+			$this_nav =~ s/%%(.+?)%%/$nav_tmpl{$1}/g ;
+			$this_page = $this_nav . $this_page . $this_nav;
+		} 
+
+		#print ">$dir/$pagename";
+                my %template = ( LARGEFILE => $large_pic_page_name,TITLE => $title . "Page " . $pagenum , 
+			CONTENT => "<!-- begin $pagename -->\n$this_page\n<!-- end $pagename -->\n" );
+                my $this_template = $page_template;
+                $this_template =~ s/%%(.+?)%%/$template{$1}/g ;
+
+		open(FD2, ">$dir/$pagename") or die $!;
+		#print FD "<!-- begin page $pagenum  -->\n$this_page<!-- end page $pagenum  -->\n";
+		print FD2 $this_template;
+		close(FD2);
+		print "wrote to $dir/$pagename\n";
+		$pagenum++;
+		$this_page="";
+	}
+} 
+# functions
+sub slurp {  my $file=shift; print "slurping $file\n"; my $fh; local($/); open($fh, $file ) or die $!; return scalar(<$fh>); }
